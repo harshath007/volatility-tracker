@@ -125,13 +125,14 @@ def train_model(df):
     df['Target'] = df['Close'].shift(-3)
     df.dropna(inplace=True)
     features = df[['EMA9', 'RSI', 'MACD', 'Volatility']].values
-    target = df['Target'].values.ravel()
+    target = df['Target'].values  # <-- FIXED here
 
     X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2, shuffle=False)
     model = XGBRegressor(n_estimators=100, learning_rate=0.1)
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
-    return model, preds[-1], r2_score(y_test, preds), mean_squared_error(y_test, preds), mean_absolute_error(y_test, preds)
+    return model, preds[-1], r2_score(y_test, preds), mean_squared_error(y_test, preds)
+
 
 # ---------------------------
 # Plotting
