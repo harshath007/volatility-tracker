@@ -107,5 +107,4 @@ if symbol:
                     st.write(f"**Actual historical target morning change (last available):** {target*100:.2f}%")
                 else:
                     st.write("**No historical morning target data available for comparison.**")
-ent Indicator Values")
-                st.dataframe(df[['EMA9', 'RSI', 'MACD', 'Volatility']].tail(5))
+
