@@ -7,92 +7,105 @@ from ta.trend import EMAIndicator, MACD
 from ta.momentum import RSIIndicator
 
 # ---------------------------
-# Fetch stock data safely
+# Data Fetching
 # ---------------------------
+
 def fetch_stock_data(symbol):
     end = datetime.now()
     start = end - timedelta(days=10)
     df = yf.download(symbol, interval='5m', start=start, end=end, prepost=True)
-    if df.empty:
+    if df.empty or 'Close' not in df.columns or df['Close'].dropna().empty:
         return None
-    df.index = pd.to_datetime(df.index)
     return df
 
 # ---------------------------
-# Add indicators safely
+# Technical Indicators
 # ---------------------------
+
 def add_indicators(df):
-    if 'Close' not in df.columns or df['Close'].dropna().empty:
-        return None
-    
+    # Clean data
+    df = df.dropna(subset=['Close'])
+    df = df.sort_index()
+    if not df.index.is_unique:
+        df = df[~df.index.duplicated(keep='first')]
+
+    # Calculate indicators
     df['EMA9'] = EMAIndicator(close=df['Close'], window=9).ema_indicator()
     df['RSI'] = RSIIndicator(close=df['Close']).rsi()
     df['MACD'] = MACD(close=df['Close']).macd()
     df['Volatility'] = df['Close'].rolling(window=10).std()
+
     return df.dropna()
 
 # ---------------------------
-# Simple weighted score prediction
+# Prediction Score (simple weighted avg)
 # ---------------------------
-def compute_score(df):
-    def normalize(series):
-        return (series - series.min()) / (series.max() - series.min() + 1e-9)
 
-    ema_norm = normalize(df['EMA9'])
-    rsi_norm = df['RSI'] / 100
-    macd_norm = normalize(df['MACD'])
-    vol_norm = normalize(df['Volatility'])
-    
-    score = (
-        0.3 * ema_norm.iloc[-1] +
-        0.3 * rsi_norm.iloc[-1] +
-        0.3 * macd_norm.iloc[-1] +
-        0.1 * (1 - vol_norm.iloc[-1])  # less volatility better
-    )
+def compute_score(df):
+    # Normalize indicators
+    norm_ema = (df['EMA9'].iloc[-1] - df['EMA9'].min()) / (df['EMA9'].max() - df['EMA9'].min() + 1e-9)
+    norm_rsi = df['RSI'].iloc[-1] / 100
+    norm_macd = (df['MACD'].iloc[-1] - df['MACD'].min()) / (df['MACD'].max() - df['MACD'].min() + 1e-9)
+    norm_vol = (df['Volatility'].iloc[-1] - df['Volatility'].min()) / (df['Volatility'].max() - df['Volatility'].min() + 1e-9)
+
+    # Weighted sum (favor lower volatility)
+    score = 0.3 * norm_ema + 0.3 * norm_rsi + 0.3 * norm_macd + 0.1 * (1 - norm_vol)
     return score
 
 # ---------------------------
-# Convert score to verbal and % prediction
+# Get next morning open-to-9:30am price change target
 # ---------------------------
-def verbal_and_price_change(score):
-    # Map score (0 to 1) roughly to a predicted % price change range -1.5% to +1.5%
-    predicted_change = (score - 0.5) * 3  # range roughly -1.5% to +1.5%
-    
-    if score > 0.65:
-        verbal = "📈 Likely to perform well tomorrow morning."
-    elif score < 0.35:
-        verbal = "📉 May underperform tomorrow morning."
-    else:
-        verbal = "⚖️ May remain neutral or range-bound tomorrow morning."
-    
-    return verbal, predicted_change
+
+def get_target(df):
+    df = df.tz_localize(None)
+    try:
+        morning_open = df.between_time('06:30', '06:30')['Open']
+        morning_close = df.between_time('09:30', '09:30')['Close']
+        if morning_open.empty or morning_close.empty:
+            return None
+        open_price = morning_open.iloc[-1]
+        close_price = morning_close.iloc[-1]
+        return (close_price - open_price) / open_price
+    except Exception:
+        return None
 
 # ---------------------------
 # Streamlit UI
 # ---------------------------
-st.set_page_config(page_title="Simple Stock Morning Predictor", layout="centered")
-st.title("🔎 Simple Morning Stock Predictor")
 
-symbol = st.text_input("Enter Stock/ETF Symbol (e.g. TSLA, AAPL, GLD)").strip().upper()
+st.set_page_config(page_title="Stock Morning Predictor", layout="wide")
+st.title("🔍 Simple Morning Stock Predictor")
+
+symbol = st.text_input("Enter Stock/ETF Symbol (e.g. AAPL, TSLA, GLD)")
 
 if symbol:
-    with st.spinner(f"Fetching data for {symbol}..."):
-        df = fetch_stock_data(symbol)
+    with st.spinner("Fetching data..."):
+        df = fetch_stock_data(symbol.upper())
         if df is None:
-            st.error(f"No data found for symbol '{symbol}'. Please check the symbol and try again.")
+            st.error("No valid data found for this symbol in the past 10 days.")
         else:
             df = add_indicators(df)
-            if df is None or df.empty:
-                st.error("Insufficient data to calculate indicators. Try another symbol or check market hours.")
+            if df.empty:
+                st.error("Insufficient data after processing to compute indicators.")
             else:
                 score = compute_score(df)
-                verbal, predicted_change = verbal_and_price_change(score)
-                
-                st.subheader(f"Prediction for {symbol}:")
-                st.metric("Morning Profitability Score", f"{score:.2f} / 1.00")
-                st.write(verbal)
-                st.write(f"📊 **Predicted Price Change (6:30–9:30 AM PT):** {predicted_change:.2%}")
+                target = get_target(df)
 
-                # Optional: Show last 5 rows of indicator values for transparency
-                st.markdown("### Recent Indicator Values")
+                st.subheader(f"📊 Prediction for {symbol.upper()}")
+                st.metric("Predicted Morning Price Change", 
+                          f"{(score - 0.5)*2*100:.2f}% (approx.)")
+
+                # Verbal summary based on score
+                if score > 0.65:
+                    st.success("📈 This stock is likely to gain in tomorrow morning's volatility period.")
+                elif score < 0.35:
+                    st.warning("📉 This stock may decline in tomorrow morning's volatility period.")
+                else:
+                    st.info("⚖️ This stock is expected to be relatively neutral tomorrow morning.")
+
+                if target is not None:
+                    st.write(f"**Actual historical target morning change (last available):** {target*100:.2f}%")
+                else:
+                    st.write("**No historical morning target data available for comparison.**")
+ent Indicator Values")
                 st.dataframe(df[['EMA9', 'RSI', 'MACD', 'Volatility']].tail(5))
