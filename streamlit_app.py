@@ -7,25 +7,16 @@ from ta.trend import EMAIndicator, MACD
 from ta.momentum import RSIIndicator
 from pytrends.request import TrendReq
 from transformers import pipeline
-import requests
-from bs4 import BeautifulSoup
-import matplotlib.pyplot as plt
-import holidays
 
-# Set page style
-st.set_page_config("📈 Stock Mood", layout="wide")
-st.markdown("## 🌅 Morning Stock Performance Forecaster")
-
-# Utility Functions
+# Fetch stock data - last 10 days, 5m interval, including pre/post market
 def fetch_stock_data(symbol):
     end = datetime.now()
-    start = end - timedelta(days=5)
+    start = end - timedelta(days=10)
     df = yf.download(symbol, interval='5m', start=start, end=end, prepost=True)
-    if df.empty:
-        return pd.DataFrame()
-    df.index = df.index.tz_convert('US/Pacific') if df.index.tz else df.index.tz_localize('UTC').tz_convert('US/Pacific')
-    return df.dropna()
+    df.dropna(inplace=True)
+    return df
 
+# Calculate indicators
 def add_indicators(df):
     df['EMA9'] = EMAIndicator(close=df['Close'], window=9).ema_indicator()
     df['RSI'] = RSIIndicator(close=df['Close']).rsi()
@@ -33,98 +24,105 @@ def add_indicators(df):
     df['Volatility'] = df['Close'].rolling(window=10).std()
     return df.dropna()
 
+# Get Google Trends score
 def get_google_trend_score(keyword):
+    pytrends = TrendReq(hl='en-US', tz=360)
     try:
-        pytrends = TrendReq(hl='en-US', tz=360)
-        pytrends.build_payload([keyword], cat=0, timeframe='now 7-d')
+        pytrends.build_payload([keyword], timeframe='now 7-d')
         data = pytrends.interest_over_time()
-        return int(data[keyword].iloc[-1]) if not data.empty else 0
+        if not data.empty:
+            return data[keyword].iloc[-1]
     except:
-        return 0
+        pass
+    return 0
 
-def fetch_headlines(symbol):
+# Get FinBERT sentiment score (simplified with two sample headlines)
+def get_sentiment_score(keyword):
+    classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert", device=-1)
+    headlines = [
+        f"{keyword} stock rises after positive earnings",
+        f"{keyword} faces regulatory scrutiny",
+    ]
+    results = classifier(headlines)
+    score = 0
+    for r in results:
+        if r['label'] == 'positive':
+            score += r['score']
+        elif r['label'] == 'negative':
+            score -= r['score']
+    return score / len(results)
+
+# Calculate next morning (6:30-9:30 PT) price change as label
+def get_target_price_change(df):
+    df.index = df.index.tz_localize(None)
     try:
-        url = f"https://finance.yahoo.com/quote/{symbol}?p={symbol}"
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        soup = BeautifulSoup(r.text, 'html.parser')
-        return [x.text.strip() for x in soup.find_all('h3') if x.text.strip()][:5]
+        open_price = df.between_time('06:30', '06:30')['Open'][-1]
+        close_price = df.between_time('09:30', '09:30')['Close'][-1]
+        return (close_price - open_price) / open_price
     except:
-        return [f"Failed to fetch news for {symbol}"]
+        return None
 
-def get_sentiment_score(headlines):
-    try:
-        classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert")
-        results = classifier(headlines)
-        score = sum((r["score"] if r["label"] == "positive" else -r["score"]) for r in results)
-        return round(score / len(results), 3)
-    except:
-        return 0.0
+# Combine scores in weighted sum to predict next morning price change
+def predict_morning_change(df, trend_score, sentiment_score):
+    # Normalize indicators to 0-1 scale
+    def norm(series):
+        return (series - series.min()) / (series.max() - series.min() + 1e-9)
+    
+    ema = norm(df['EMA9']).iloc[-1]
+    rsi = df['RSI'].iloc[-1] / 100
+    macd = norm(df['MACD']).iloc[-1]
+    vol = 1 - norm(df['Volatility']).iloc[-1]  # Less volatility favored
 
-def compute_composite_score(df, trend_score, sentiment_score):
-    df = df.copy()
-    df['norm_EMA'] = (df['EMA9'] - df['EMA9'].min()) / (df['EMA9'].max() - df['EMA9'].min())
-    df['norm_RSI'] = df['RSI'] / 100
-    df['norm_MACD'] = (df['MACD'] - df['MACD'].min()) / (df['MACD'].max() - df['MACD'].min())
-    df['norm_Volatility'] = (df['Volatility'] - df['Volatility'].min()) / (df['Volatility'].max() - df['Volatility'].min())
+    # Fixed weights - simple and intuitive
+    weights = {
+        'EMA9': 0.25,
+        'RSI': 0.25,
+        'MACD': 0.2,
+        'Volatility': 0.1,
+        'Trend': 0.1,
+        'Sentiment': 0.1
+    }
 
-    score = (
-        0.25 * df['norm_EMA'].iloc[-1] +
-        0.2 * df['norm_RSI'].iloc[-1] +
-        0.2 * df['norm_MACD'].iloc[-1] +
-        0.1 * (1 - df['norm_Volatility'].iloc[-1]) +
-        0.15 * trend_score / 100 +
-        0.1 * sentiment_score
-    )
-    return round(score * 100, 2)
+    score = (ema * weights['EMA9'] +
+             rsi * weights['RSI'] +
+             macd * weights['MACD'] +
+             vol * weights['Volatility'] +
+             (trend_score / 100) * weights['Trend'] +
+             sentiment_score * weights['Sentiment'])
 
-def plot_indicators(df):
-    fig, axs = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+    return score
 
-    axs[0].plot(df.index, df['Close'], label='Close', color='cyan')
-    axs[0].plot(df.index, df['EMA9'], label='EMA9', color='magenta')
-    axs[0].legend()
-    axs[0].set_title('Close & EMA9')
+# Streamlit UI
+st.set_page_config(page_title="Simple Morning Stock Predictor", layout="centered")
+st.title("🔎 Simple Morning Stock Predictor")
 
-    axs[1].plot(df.index, df['RSI'], color='orange')
-    axs[1].axhline(70, color='red', linestyle='--')
-    axs[1].axhline(30, color='green', linestyle='--')
-    axs[1].set_title('RSI')
-
-    axs[2].plot(df.index, df['MACD'], color='purple')
-    axs[2].axhline(0, color='black', linestyle='--')
-    axs[2].set_title('MACD')
-
-    plt.tight_layout()
-    st.pyplot(fig)
-
-# Holiday check
-if datetime.today().date() in holidays.US():
-    st.warning("📅 Today is a U.S. market holiday.")
-
-# Main App
-symbol = st.text_input("Enter Stock/ETF Symbol (e.g. AAPL, QQQ, TSLA):").upper()
+symbol = st.text_input("Enter Stock/ETF Symbol (e.g. TSLA, AAPL, GLD)").upper()
 
 if symbol:
-    try:
+    with st.spinner("Fetching data and calculating prediction..."):
         df = fetch_stock_data(symbol)
         if df.empty:
-            st.error("No data found. The symbol may be invalid or market may be closed.")
+            st.error("No data found for this symbol. Try another one.")
         else:
             df = add_indicators(df)
-            trend = get_google_trend_score(symbol)
-            headlines = fetch_headlines(symbol)
-            sentiment = get_sentiment_score(headlines)
-            score = compute_composite_score(df, trend, sentiment)
+            trend_score = get_google_trend_score(symbol)
+            sentiment_score = get_sentiment_score(symbol)
+            label = get_target_price_change(df)
 
-            st.metric("📊 Composite Score", f"{score}%")
-            st.metric("📈 Google Trend", trend)
-            st.metric("📰 News Sentiment", sentiment)
+            if label is None:
+                st.warning("Market not open or insufficient data for 6:30-9:30 AM PT period.")
+            else:
+                pred_score = predict_morning_change(df, trend_score, sentiment_score)
 
-            st.subheader("🗞️ Headlines")
-            for h in headlines:
-                st.write("- " + h)
+                st.subheader(f"Prediction for {symbol} (Next Morning 6:30-9:30 AM PT)")
+                st.metric("Predicted Morning Score", f"{pred_score:.2f}")
 
-            st.subheader("📉 Technical Indicator Chart")
-            plot_indicators(df)
-    except Exception as e:
-        st.error(f"❌ Error: {e}")
+                if pred_score > 0.6:
+                    st.success("Likely to increase in price.")
+                elif pred_score < 0.4:
+                    st.error("Likely to decrease in price.")
+                else:
+                    st.info("Likely to stay neutral or range-bound.")
+
+                st.write(f"Historical actual next-morning price change (last day): {label:.2%}")
+
