@@ -72,7 +72,7 @@ def compute_score(df):
 
 # Streamlit UI
 st.set_page_config(page_title="Stock Morning Predictor", layout="wide")
-st.title("🔍 Simple Morning Stock Predictor")
+st.title("Stock Predictor")
 
 symbol = st.text_input("Enter Stock/ETF Symbol (e.g. AAPL, TSLA, GLD)").upper().strip()
 
