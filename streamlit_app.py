@@ -3,8 +3,9 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from ta.trend import EMAIndicator
-from ta.momentum import RSIIndicator, MACD
+from ta.trend import EMAIndicator, MACD
+from ta.momentum import RSIIndicator
+
 
 # ---------------------------
 # Data Fetching with fallback
