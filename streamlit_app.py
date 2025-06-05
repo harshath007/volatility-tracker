@@ -68,7 +68,6 @@ def get_sentiment_score_from_headlines(headlines):
             sentiment_score -= r['score']
     return sentiment_score / len(results)
 
-
 # ---------------------------
 # Label: 6:30–9:30 AM PT price change
 # ---------------------------
@@ -141,10 +140,7 @@ st.set_page_config(page_title="Morning Stock Predictor", layout="wide")
 with st.container():
     st.markdown("""
         <style>
-        .main {
-            background-color: #0e1117;
-            color: #ffffff;
-        }
+        .main { background-color: #0e1117; color: #ffffff; }
         .stMetric { font-size: 1.3em; }
         .stAlert { font-size: 1.1em; }
         .stTextInput > div > div > input {
@@ -180,7 +176,7 @@ with st.container():
                     else:
                         composite_score = compute_weighted_score(df, trend_score, sentiment_score)
 
-                        st.subheader(f"📊 Prediction for {symbol.upper()}")
+                        st.subheader(f"📈 Prediction for {symbol.upper()}")
                         st.metric("Composite Profitability Score", f"{composite_score * 100:.2f}%")
                         st.metric("6:30–9:30 AM Price Change", f"{label * 100:.2f}%")
 
