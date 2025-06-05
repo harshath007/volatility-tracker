@@ -10,6 +10,7 @@ from transformers import pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 from xgboost import XGBRegressor
+import holidays
 
 # ---------------------------
 # Data Fetching
@@ -83,13 +84,11 @@ def get_target(df):
 # ---------------------------
 
 def compute_weighted_score(df):
-    # Normalize features
     df['norm_EMA'] = (df['EMA9'] - df['EMA9'].min()) / (df['EMA9'].max() - df['EMA9'].min())
-    df['norm_RSI'] = df['RSI'] / 100  # Already 0-100
+    df['norm_RSI'] = df['RSI'] / 100
     df['norm_MACD'] = (df['MACD'] - df['MACD'].min()) / (df['MACD'].max() - df['MACD'].min())
     df['norm_Volatility'] = (df['Volatility'] - df['Volatility'].min()) / (df['Volatility'].max() - df['Volatility'].min())
-    
-    # Define fixed weights
+
     weights = {
         'EMA': 0.2,
         'RSI': 0.2,
@@ -103,14 +102,14 @@ def compute_weighted_score(df):
         weights['EMA'] * df['norm_EMA'] +
         weights['RSI'] * df['norm_RSI'] +
         weights['MACD'] * df['norm_MACD'] +
-        weights['Volatility'] * (1 - df['norm_Volatility']) +  # less volatile preferred
+        weights['Volatility'] * (1 - df['norm_Volatility']) +
         weights['TrendScore'] * df['TrendScore'].mean() / 100 +
         weights['SentimentScore'] * df['SentimentScore'].mean()
     )
     return df['CompositeScore'].iloc[-1]
 
 # ---------------------------
-# Streamlit Search-based UI
+# Streamlit UI
 # ---------------------------
 
 st.set_page_config(page_title="Stock Morning Predictor", layout="wide")
@@ -118,26 +117,41 @@ st.title("🔍 Search-Based Morning Stock Predictor")
 
 symbol = st.text_input("Search a Stock/ETF Symbol (e.g. TSLA, AAPL, GLD)")
 
+# Market holiday check
+us_holidays = holidays.US()
+today = datetime.now().date()
+if today in us_holidays or today.weekday() >= 5:
+    st.warning(f"⚠️ Today ({today.strftime('%A')}) is a market holiday or weekend.")
+
 if symbol:
     with st.spinner("Fetching data and generating prediction..."):
-        df = fetch_stock_data(symbol)
-        df = add_indicators(df)
-        trend_score = get_google_trend_score(symbol)
-        sentiment_score = get_sentiment_score(symbol)
-        label = get_target(df)
+        try:
+            df = fetch_stock_data(symbol)
+            if df.empty:
+                st.error("No data fetched. The symbol may be invalid or market is closed.")
+            else:
+                df = add_indicators(df)
+                trend_score = get_google_trend_score(symbol)
+                sentiment_score = get_sentiment_score(symbol)
+                label = get_target(df)
 
-    if label is None:
-        st.error("Couldn't find complete 6:30–9:30 AM PT data. Try another symbol or wait for market open.")
-    else:
-        df['TrendScore'] = trend_score
-        df['SentimentScore'] = sentiment_score
-        composite_score = compute_weighted_score(df)
+                if label is None:
+                    st.error("Couldn't find complete 6:30–9:30 AM PT data. Try another symbol or wait for market open.")
+                else:
+                    df['TrendScore'] = trend_score
+                    df['SentimentScore'] = sentiment_score
+                    composite_score = compute_weighted_score(df)
 
-        st.subheader(f"📊 Prediction for {symbol.upper()}")
-        st.metric("Predicted Morning Profitability Score", f"{composite_score * 100:.2f}%")
-        if composite_score > 0.6:
-            st.success("📈 This stock is likely to perform well tomorrow morning.")
-        elif composite_score < 0.4:
-            st.warning("📉 This stock may underperform in tomorrow's early session.")
-        else:
-            st.info("⚖️ This stock may remain neutral or range-bound.")
+                    st.subheader(f"📊 Prediction for {symbol.upper()}")
+                    st.metric("Predicted Morning Profitability Score", f"{composite_score * 100:.2f}%")
+                    st.metric("Predicted Price Change (6:30–9:30 AM PT)", f"{label * 100:.2f}%")
+
+                    if composite_score > 0.6:
+                        st.success("📈 This stock is likely to perform well tomorrow morning.")
+                    elif composite_score < 0.4:
+                        st.warning("📉 This stock may underperform in tomorrow's early session.")
+                    else:
+                        st.info("⚖️ This stock may remain neutral or range-bound.")
+
+        except Exception as e:
+            st.error(f"Error during prediction: {e}")
