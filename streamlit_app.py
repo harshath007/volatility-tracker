@@ -28,14 +28,32 @@ def load_data(symbol):
         if df.empty:
             return pd.DataFrame()
         df = df.copy()
-        if isinstance(df.columns, pd.MultiIndex):  # Fix multiindex columns
-            df.columns = [col[1] if col[1] else col[0] for col in df.columns]
-        df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+        # Flatten multi-index columns if needed
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [' '.join(col).strip() for col in df.columns.values]
+
+        # Try to find the correct column names
+        # Some intraday data may use 'Close' vs 'Adj Close'
+        expected_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        found_cols = [col for col in df.columns if any(k in col for k in expected_cols)]
+
+        # Normalize column names to match
+        df = df[[col for col in df.columns if any(k in col for k in expected_cols)]]
+        col_map = {col: col.split()[-1] for col in df.columns}  # e.g. "AAPL Close" → "Close"
+        df.rename(columns=col_map, inplace=True)
+
+        # Final check
+        if not all(k in df.columns for k in expected_cols):
+            raise ValueError("Missing expected price columns.")
+
+        df = df[expected_cols]
         df.dropna(inplace=True)
         return df
     except Exception as e:
         st.error(f"Failed to load data: {e}")
         return pd.DataFrame()
+
 
 def add_indicators(df):
     try:
