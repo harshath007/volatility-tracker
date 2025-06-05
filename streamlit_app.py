@@ -8,7 +8,7 @@ from ta.momentum import RSIIndicator
 from pytrends.request import TrendReq
 from transformers import pipeline
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from xgboost import XGBRegressor
 import holidays
 import requests
@@ -18,18 +18,21 @@ import matplotlib.pyplot as plt
 # ---------------------------
 # Data Fetching
 # ---------------------------
+@st.cache_data
+
 def fetch_stock_data(symbol):
     end = datetime.now()
     start = end - timedelta(days=14)
     df = yf.download(symbol, interval='5m', start=start, end=end, prepost=True)
     df.dropna(inplace=True)
-    df.index = df.index.tz_convert('US/Pacific') if df.index.tz is not None else df.index.tz_localize('UTC').tz_convert('US/Pacific')
+    df.index = pd.DatetimeIndex(df.index).tz_localize(None)
+    df.index = df.index.tz_localize('UTC').tz_convert('US/Pacific')
     return df
-
 
 # ---------------------------
 # Technical Indicators
 # ---------------------------
+@st.cache_data
 def add_indicators(df):
     df['EMA9'] = EMAIndicator(close=df['Close'], window=9).ema_indicator()
     df['RSI'] = RSIIndicator(close=df['Close']).rsi()
@@ -40,6 +43,7 @@ def add_indicators(df):
 # ---------------------------
 # Google Trends
 # ---------------------------
+@st.cache_data
 def get_google_trend_score(keyword):
     pytrends = TrendReq(hl='en-US', tz=360)
     pytrends.build_payload([keyword], cat=0, timeframe='now 7-d', geo='', gprop='')
@@ -51,6 +55,7 @@ def get_google_trend_score(keyword):
 # ---------------------------
 # Real Headlines + Sentiment
 # ---------------------------
+@st.cache_data
 def fetch_real_headlines(symbol):
     url = f"https://finance.yahoo.com/quote/{symbol}?p={symbol}"
     response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -59,8 +64,12 @@ def fetch_real_headlines(symbol):
     return headlines if headlines else [f"No recent news found for {symbol}"]
 
 def get_sentiment_score_from_headlines(headlines):
-    classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert")
-    results = classifier(headlines)
+    try:
+        classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert")
+        results = classifier(headlines)
+    except:
+        return 0
+
     sentiment_score = 0
     for r in results:
         if r['label'] == 'positive':
@@ -73,11 +82,11 @@ def get_sentiment_score_from_headlines(headlines):
 # Label: 6:30–9:30 AM PT price change
 # ---------------------------
 def get_target(df):
-    morning_open = df.between_time('06:30', '06:30')['Open']
-    morning_close = df.between_time('09:30', '09:30')['Close']
+    morning_open = df.between_time('06:30', '06:35')['Open']
+    morning_close = df.between_time('09:25', '09:30')['Close']
     if morning_open.empty or morning_close.empty:
         return None
-    open_price = morning_open.iloc[-1]
+    open_price = morning_open.iloc[0]
     close_price = morning_close.iloc[-1]
     return (close_price - open_price) / open_price
 
@@ -122,8 +131,7 @@ def train_model(df):
     model = XGBRegressor(n_estimators=100, learning_rate=0.1)
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
-    return model, preds[-1], r2_score(y_test, preds), mean_squared_error(y_test, preds)
-
+    return model, preds[-1], r2_score(y_test, preds), mean_squared_error(y_test, preds), mean_absolute_error(y_test, preds)
 
 # ---------------------------
 # Plotting
@@ -190,7 +198,7 @@ with st.container():
                     headlines = fetch_real_headlines(symbol)
                     sentiment_score = float(get_sentiment_score_from_headlines(headlines))
                     label = get_target(df)
-                    model, model_pred, r2, mse = train_model(df)
+                    model, model_pred, r2, mse, mae = train_model(df)
 
                     if label is None:
                         st.error("Couldn't find complete 6:30–9:30 AM PT data. Try another symbol or wait for market open.")
@@ -202,6 +210,7 @@ with st.container():
                         st.metric("6:30–9:30 AM Price Change", f"{label * 100:.2f}%")
                         st.metric("XGBoost Forecast (Next Close)", f"${model_pred:.2f}")
                         st.metric("Model R² Score", f"{r2:.3f}")
+                        st.metric("Model MAE", f"${mae:.2f}")
 
                         st.info("**Top Headlines**")
                         for h in headlines:
