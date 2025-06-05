@@ -25,8 +25,13 @@ with st.expander("📌 Fortune 500 Tickers"):
 def load_data(symbol):
     try:
         df = yf.download(symbol, interval='30m', period='10d', progress=False)
-        df.dropna(inplace=True)
+        if df.empty:
+            return pd.DataFrame()
+        df = df.copy()
+        if isinstance(df.columns, pd.MultiIndex):  # Fix multiindex columns
+            df.columns = [col[1] if col[1] else col[0] for col in df.columns]
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+        df.dropna(inplace=True)
         return df
     except Exception as e:
         st.error(f"Failed to load data: {e}")
@@ -35,16 +40,18 @@ def load_data(symbol):
 def add_indicators(df):
     try:
         df = df.copy()
-        df['EMA9'] = EMAIndicator(close=df['Close'], window=9).ema_indicator()
-        df['EMA21'] = EMAIndicator(close=df['Close'], window=21).ema_indicator()
-        df['RSI'] = RSIIndicator(close=df['Close'], window=14).rsi()
-        macd = MACD(close=df['Close'])
+        close_series = df['Close'].astype(float).squeeze()  # Ensure it's 1D float
+        df['EMA9'] = EMAIndicator(close=close_series, window=9).ema_indicator()
+        df['EMA21'] = EMAIndicator(close=close_series, window=21).ema_indicator()
+        df['RSI'] = RSIIndicator(close=close_series, window=14).rsi()
+        macd = MACD(close=close_series)
         df['MACD'] = macd.macd()
         df['Signal'] = macd.macd_signal()
         return df.dropna()
     except Exception as e:
         st.error(f"Error processing indicators: {e}")
-        return df
+        return pd.DataFrame()
+
 
 # Simple scoring model for prediction
 def predict_movement(df):
