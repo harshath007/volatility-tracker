@@ -12,14 +12,21 @@ def fetch_stock_data(symbol):
     start = end - timedelta(days=10)
 
     df = yf.download(symbol, interval='5m', start=start, end=end, prepost=True)
+
+    # Flatten columns if MultiIndex
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
     if df is None or df.empty or 'Close' not in df.columns or df['Close'].dropna().empty:
-        # Fallback to daily data
         df = yf.download(symbol, interval='1d', start=start, end=end)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
         if df is None or df.empty or 'Close' not in df.columns or df['Close'].dropna().empty:
             return None, "No valid data found for symbol."
         else:
             return df, "Using daily data fallback."
     return df, "Using 5-minute intraday data."
+
 
 # Add technical indicators safely
 def add_indicators(df):
