@@ -51,12 +51,15 @@ def fetch_real_headlines(symbol):
     url = f"https://finance.yahoo.com/quote/{symbol}?p={symbol}"
     response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
     soup = BeautifulSoup(response.content, 'html.parser')
-    headlines = [tag.text for tag in soup.find_all('h3')][:5]
-    return headlines if headlines else [f"No recent news found for {symbol}"]
+    headlines = [tag.text.strip() for tag in soup.find_all('h3')]
+    return headlines[:5] if headlines else [f"No recent news found for {symbol}"]
 
 def get_sentiment_score_from_headlines(headlines):
+    clean_headlines = [str(h).strip() for h in headlines if isinstance(h, str) and h.strip()]
+    if not clean_headlines:
+        return 0
     classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert")
-    results = classifier(headlines)
+    results = classifier(clean_headlines)
     sentiment_score = 0
     for r in results:
         if r['label'] == 'positive':
@@ -64,6 +67,7 @@ def get_sentiment_score_from_headlines(headlines):
         elif r['label'] == 'negative':
             sentiment_score -= r['score']
     return sentiment_score / len(results)
+
 
 # ---------------------------
 # Label: 6:30–9:30 AM PT price change
