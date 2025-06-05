@@ -11,22 +11,24 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 from xgboost import XGBRegressor
 import holidays
+import requests
+from bs4 import BeautifulSoup
+import matplotlib.pyplot as plt
 
 # ---------------------------
 # Data Fetching
 # ---------------------------
-
 def fetch_stock_data(symbol):
     end = datetime.now()
-    start = end - timedelta(days=10)
+    start = end - timedelta(days=14)
     df = yf.download(symbol, interval='5m', start=start, end=end, prepost=True)
     df.dropna(inplace=True)
+    df.index = df.index.tz_localize('UTC').tz_convert('US/Pacific')
     return df
 
 # ---------------------------
 # Technical Indicators
 # ---------------------------
-
 def add_indicators(df):
     df['EMA9'] = EMAIndicator(close=df['Close'], window=9).ema_indicator()
     df['RSI'] = RSIIndicator(close=df['Close']).rsi()
@@ -37,7 +39,6 @@ def add_indicators(df):
 # ---------------------------
 # Google Trends
 # ---------------------------
-
 def get_google_trend_score(keyword):
     pytrends = TrendReq(hl='en-US', tz=360)
     pytrends.build_payload([keyword], cat=0, timeframe='now 7-d', geo='', gprop='')
@@ -47,14 +48,16 @@ def get_google_trend_score(keyword):
     return 0
 
 # ---------------------------
-# FinBERT Sentiment
+# Real Headlines + Sentiment
 # ---------------------------
+def fetch_real_headlines(symbol):
+    url = f"https://finance.yahoo.com/quote/{symbol}?p={symbol}"
+    response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+    soup = BeautifulSoup(response.content, 'html.parser')
+    headlines = [tag.text for tag in soup.find_all('h3')][:5]
+    return headlines if headlines else [f"No recent news found for {symbol}"]
 
-def get_sentiment_score(keyword):
-    headlines = [
-        f"{keyword} stock price rises after earnings beat",
-        f"{keyword} faces investigation over compliance",
-    ]
+def get_sentiment_score_from_headlines(headlines):
     classifier = pipeline("sentiment-analysis", model="ProsusAI/finbert")
     results = classifier(headlines)
     sentiment_score = 0
@@ -68,9 +71,7 @@ def get_sentiment_score(keyword):
 # ---------------------------
 # Label: 6:30–9:30 AM PT price change
 # ---------------------------
-
 def get_target(df):
-    df.index = df.index.tz_localize(None)
     morning_open = df.between_time('06:30', '06:30')['Open']
     morning_close = df.between_time('09:30', '09:30')['Close']
     if morning_open.empty or morning_close.empty:
@@ -80,10 +81,9 @@ def get_target(df):
     return (close_price - open_price) / open_price
 
 # ---------------------------
-# Strict Weighted Formula
+# Composite Scoring
 # ---------------------------
-
-def compute_weighted_score(df):
+def compute_weighted_score(df, trend_score, sentiment_score):
     df['norm_EMA'] = (df['EMA9'] - df['EMA9'].min()) / (df['EMA9'].max() - df['EMA9'].min())
     df['norm_RSI'] = df['RSI'] / 100
     df['norm_MACD'] = (df['MACD'] - df['MACD'].min()) / (df['MACD'].max() - df['MACD'].min())
@@ -98,60 +98,114 @@ def compute_weighted_score(df):
         'SentimentScore': 0.15
     }
 
-    df['CompositeScore'] = (
-        weights['EMA'] * df['norm_EMA'] +
-        weights['RSI'] * df['norm_RSI'] +
-        weights['MACD'] * df['norm_MACD'] +
-        weights['Volatility'] * (1 - df['norm_Volatility']) +
-        weights['TrendScore'] * df['TrendScore'].mean() / 100 +
-        weights['SentimentScore'] * df['SentimentScore'].mean()
+    score = (
+        weights['EMA'] * df['norm_EMA'].iloc[-1] +
+        weights['RSI'] * df['norm_RSI'].iloc[-1] +
+        weights['MACD'] * df['norm_MACD'].iloc[-1] +
+        weights['Volatility'] * (1 - df['norm_Volatility'].iloc[-1]) +
+        weights['TrendScore'] * trend_score / 100 +
+        weights['SentimentScore'] * sentiment_score
     )
-    return df['CompositeScore'].iloc[-1]
+    return score
+
+# ---------------------------
+# Model Training
+# ---------------------------
+def train_model(df):
+    df['Target'] = df['Close'].shift(-3)
+    df.dropna(inplace=True)
+    features = df[['EMA9', 'RSI', 'MACD', 'Volatility']]
+    target = df['Target']
+
+    X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2, shuffle=False)
+    model = XGBRegressor(n_estimators=100, learning_rate=0.1)
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    return model, preds[-1], r2_score(y_test, preds), mean_squared_error(y_test, preds)
+
+# ---------------------------
+# Plotting
+# ---------------------------
+def plot_indicators(df):
+    fig, axs = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+    fig.patch.set_facecolor('#111')
+
+    axs[0].plot(df.index, df['Close'], label='Close', color='cyan')
+    axs[0].plot(df.index, df['EMA9'], label='EMA9', color='magenta')
+    axs[0].legend()
+    axs[0].set_title('Close & EMA9')
+
+    axs[1].plot(df.index, df['RSI'], color='orange')
+    axs[1].axhline(70, color='red', linestyle='--')
+    axs[1].axhline(30, color='green', linestyle='--')
+    axs[1].set_title('RSI')
+
+    axs[2].plot(df.index, df['MACD'], color='magenta')
+    axs[2].axhline(0, color='black', linestyle='--')
+    axs[2].set_title('MACD')
+
+    plt.tight_layout()
+    st.pyplot(fig)
 
 # ---------------------------
 # Streamlit UI
 # ---------------------------
+st.set_page_config(page_title="Morning Stock Predictor", layout="wide")
 
-st.set_page_config(page_title="Stock Morning Predictor", layout="wide")
-st.title("🔍 Search-Based Morning Stock Predictor")
+with st.container():
+    st.markdown("""
+        <style>
+        .main {
+            background-color: #0e1117;
+            color: #ffffff;
+        }
+        .stMetric { font-size: 1.3em; }
+        .stAlert { font-size: 1.1em; }
+        .stTextInput > div > div > input {
+            background-color: #1e222a;
+            color: white;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
-symbol = st.text_input("Search a Stock/ETF Symbol (e.g. TSLA, AAPL, GLD)")
+    st.title("\U0001F4B0 Morning Stock Performance Forecaster")
+    symbol = st.text_input("Enter Stock/ETF Symbol (e.g. TSLA, AAPL, QQQ)")
 
-# Market holiday check
-us_holidays = holidays.US()
-today = datetime.now().date()
-if today in us_holidays or today.weekday() >= 5:
-    st.warning(f"⚠️ Today ({today.strftime('%A')}) is a market holiday or weekend.")
+    us_holidays = holidays.US()
+    today = datetime.now().date()
+    if today in us_holidays or today.weekday() >= 5:
+        st.warning(f"⚠️ Today ({today.strftime('%A')}) is a market holiday or weekend.")
 
-if symbol:
-    with st.spinner("Fetching data and generating prediction..."):
-        try:
-            df = fetch_stock_data(symbol)
-            if df.empty:
-                st.error("No data fetched. The symbol may be invalid or market is closed.")
-            else:
-                df = add_indicators(df)
-                trend_score = get_google_trend_score(symbol)
-                sentiment_score = get_sentiment_score(symbol)
-                label = get_target(df)
-
-                if label is None:
-                    st.error("Couldn't find complete 6:30–9:30 AM PT data. Try another symbol or wait for market open.")
+    if symbol:
+        with st.spinner("Analyzing market data, trends, and headlines..."):
+            try:
+                df = fetch_stock_data(symbol)
+                if df.empty:
+                    st.error("No data fetched. The symbol may be invalid or market is closed.")
                 else:
-                    df['TrendScore'] = trend_score
-                    df['SentimentScore'] = sentiment_score
-                    composite_score = compute_weighted_score(df)
+                    df = add_indicators(df)
+                    trend_score = float(get_google_trend_score(symbol))
+                    headlines = fetch_real_headlines(symbol)
+                    sentiment_score = float(get_sentiment_score_from_headlines(headlines))
+                    label = get_target(df)
+                    model, model_pred, r2, mse = train_model(df)
 
-                    st.subheader(f"📊 Prediction for {symbol.upper()}")
-                    st.metric("Predicted Morning Profitability Score", f"{composite_score * 100:.2f}%")
-                    st.metric("Predicted Price Change (6:30–9:30 AM PT)", f"{label * 100:.2f}%")
-
-                    if composite_score > 0.6:
-                        st.success("📈 This stock is likely to perform well tomorrow morning.")
-                    elif composite_score < 0.4:
-                        st.warning("📉 This stock may underperform in tomorrow's early session.")
+                    if label is None:
+                        st.error("Couldn't find complete 6:30–9:30 AM PT data. Try another symbol or wait for market open.")
                     else:
-                        st.info("⚖️ This stock may remain neutral or range-bound.")
+                        composite_score = compute_weighted_score(df, trend_score, sentiment_score)
 
-        except Exception as e:
-            st.error(f"Error during prediction: {e}")
+                        st.subheader(f"\U0001F4CA Prediction for {symbol.upper()}")
+                        st.metric("Composite Profitability Score", f"{composite_score * 100:.2f}%")
+                        st.metric("6:30–9:30 AM Price Change", f"{label * 100:.2f}%")
+                        st.metric("XGBoost Forecast (Next Close)", f"${model_pred:.2f}")
+                        st.metric("Model R² Score", f"{r2:.3f}")
+
+                        st.info("**Top Headlines**")
+                        for h in headlines:
+                            st.markdown(f"- {h}")
+
+                        plot_indicators(df)
+
+            except Exception as e:
+                st.error(f"Error during prediction: {e}")
