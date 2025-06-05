@@ -23,8 +23,9 @@ def fetch_stock_data(symbol):
     start = end - timedelta(days=14)
     df = yf.download(symbol, interval='5m', start=start, end=end, prepost=True)
     df.dropna(inplace=True)
-    df.index = df.index.tz_localize('UTC').tz_convert('US/Pacific')
+    df.index = df.index.tz_convert('US/Pacific') if df.index.tz is not None else df.index.tz_localize('UTC').tz_convert('US/Pacific')
     return df
+
 
 # ---------------------------
 # Technical Indicators
