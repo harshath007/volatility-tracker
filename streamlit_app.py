@@ -1,113 +1,125 @@
-# app.py
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from ta.trend import EMAIndicator, MACD, ADXIndicator, CCIIndicator
+from ta.volatility import BollingerBands, AverageTrueRange
+from ta.momentum import RSIIndicator
+from ta.volume import OnBalanceVolumeIndicator
+import nltk
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from textblob import TextBlob
 
-:contentReference[oaicite:11]{index=11}
-:contentReference[oaicite:12]{index=12}
-:contentReference[oaicite:13]{index=13}
-:contentReference[oaicite:14]{index=14}
-:contentReference[oaicite:15]{index=15}
-:contentReference[oaicite:16]{index=16}
-:contentReference[oaicite:17]{index=17}
-:contentReference[oaicite:18]{index=18}
-:contentReference[oaicite:19]{index=19}
-:contentReference[oaicite:20]{index=20}
-:contentReference[oaicite:21]{index=21}
-:contentReference[oaicite:22]{index=22}
-import torch
+# Download required nltk data
+nltk.download('vader_lexicon')
 
-# Initialize sentiment tools
-:contentReference[oaicite:23]{index=23}
+# Initialize VADER sentiment analyzer
 vader = SentimentIntensityAnalyzer()
-:contentReference[oaicite:24]{index=24}
-:contentReference[oaicite:25]{index=25}
 
-# SETTINGS
-:contentReference[oaicite:26]{index=26}
-:contentReference[oaicite:27]{index=27}
-:contentReference[oaicite:28]{index=28}
-:contentReference[oaicite:29]{index=29}
+st.set_page_config(page_title="Volatility & Sentiment Tracker (No APIs)", layout="wide")
+st.title("📈 Volatility & Sentiment Tracker (No API Required)")
+
+symbol = st.text_input("Enter Stock/ETF Symbol (e.g. AAPL, TSLA)", "AAPL").upper().strip()
+if not symbol:
     st.stop()
 
-# Data fetch & indicators
-:contentReference[oaicite:30]{index=30}
-:contentReference[oaicite:31]{index=31}
-    :contentReference[oaicite:32]{index=32}
-    :contentReference[oaicite:33]{index=33}
-    :contentReference[oaicite:34]{index=34}
-    :contentReference[oaicite:35]{index=35}
-    :contentReference[oaicite:36]{index=36}
-    :contentReference[oaicite:37]{index=37}
-    :contentReference[oaicite:38]{index=38}
-    :contentReference[oaicite:39]{index=39}
-    :contentReference[oaicite:40]{index=40}
-    :contentReference[oaicite:41]{index=41}
-    :contentReference[oaicite:42]{index=42}
-    :contentReference[oaicite:43]{index=43}
-    :contentReference[oaicite:44]{index=44}
+@st.cache_data(ttl=1800)
+def load_data(ticker):
+    end = datetime.now()
+    start = end - timedelta(days=365)
+    df = yf.download(ticker, start=start, end=end, interval='1d')
+    df.dropna(inplace=True)
+
+    df['EMA9'] = EMAIndicator(df['Close'], window=9).ema_indicator()
+    df['RSI'] = RSIIndicator(df['Close'], window=14).rsi()
+    df['MACD'] = MACD(df['Close']).macd()
+    df['ADX'] = ADXIndicator(df['High'], df['Low'], df['Close']).adx()
+    df['CCI'] = CCIIndicator(df['High'], df['Low'], df['Close']).cci()
+    bb = BollingerBands(df['Close'], window=20, window_dev=2)
+    df['BB_width'] = (bb.bollinger_hband() - bb.bollinger_lband()) / df['Close']
+    df['ATR'] = AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range()
+    df['OBV'] = OnBalanceVolumeIndicator(df['Close'], df['Volume']).on_balance_volume()
+    df['Volatility'] = df['Close'].pct_change().rolling(10).std() * np.sqrt(252)
     return df
 
-:contentReference[oaicite:45]{index=45}
-:contentReference[oaicite:46]{index=46}
-    :contentReference[oaicite:47]{index=47}
+df = load_data(symbol)
+if df.empty:
+    st.error("No data found for this symbol.")
     st.stop()
 
-# Sentiment functions
-:contentReference[oaicite:48]{index=48}
-    :contentReference[oaicite:49]{index=49}
-                         :contentReference[oaicite:50]{index=50}
-                         user_agent="voltracker")
-    :contentReference[oaicite:51]{index=51}
-    :contentReference[oaicite:52]{index=52}
+# Dummy sentiment source: use latest 10 headlines from Yahoo Finance (free scraping)
+@st.cache_data(ttl=1800)
+def fetch_headlines(ticker):
+    import requests
+    from bs4 import BeautifulSoup
 
-def news_sentiment():
-    q = symbol
-    :contentReference[oaicite:53]{index=53}
-    :contentReference[oaicite:54]{index=54}
-    :contentReference[oaicite:55]{index=55}
-    scores = []
-    :contentReference[oaicite:56]{index=56}
-        :contentReference[oaicite:57]{index=57}
-        :contentReference[oaicite:58]{index=58}
-        # FinBERT scoring
-        :contentReference[oaicite:59]{index=59}
-        :contentReference[oaicite:60]{index=60}
-        :contentReference[oaicite:61]{index=61}
-        :contentReference[oaicite:62]{index=62}
-        :contentReference[oaicite:63]{index=63}
-    :contentReference[oaicite:64]{index=64}
+    url = f"https://finance.yahoo.com/quote/{ticker}?p={ticker}"
+    try:
+        r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"})
+        soup = BeautifulSoup(r.text, 'html.parser')
+        # Look for headlines under "Latest News" section
+        headlines = []
+        for item in soup.select('h3'):
+            txt = item.get_text()
+            if len(txt) > 10:
+                headlines.append(txt)
+        return headlines[:10]
+    except Exception:
+        return []
 
-# Compute values
-sent_reddit = reddit_sentiment()
-sent_news = news_sentiment()
-:contentReference[oaicite:65]{index=65}
+headlines = fetch_headlines(symbol)
+if not headlines:
+    st.warning("Could not fetch recent news headlines for sentiment. Using sample sentences.")
+    headlines = [
+        "Stock rallies on strong earnings report.",
+        "Market uncertainty affects tech stocks.",
+        "Analysts upgrade the company outlook."
+    ]
 
-:contentReference[oaicite:66]{index=66}
-:contentReference[oaicite:67]{index=67}
-:contentReference[oaicite:68]{index=68}
+# Calculate sentiment scores
+vader_scores = [vader.polarity_scores(h)['compound'] for h in headlines]
+textblob_scores = [TextBlob(h).sentiment.polarity for h in headlines]
 
-# UI
-:contentReference[oaicite:69]{index=69}
-with tab1:
-    :contentReference[oaicite:70]{index=70}
-    :contentReference[oaicite:71]{index=71}*100:.2f}%")
-    :contentReference[oaicite:72]{index=72}*100:.2f}%")
-    :contentReference[oaicite:73]{index=73}
-    :contentReference[oaicite:74]{index=74}
+avg_vader = np.mean(vader_scores)
+avg_textblob = np.mean(textblob_scores)
+composite_sentiment = np.mean([avg_vader, avg_textblob])
 
-with tab2:
-    :contentReference[oaicite:75]{index=75}
-    :contentReference[oaicite:76]{index=76}
-    :contentReference[oaicite:77]{index=77}
-    :contentReference[oaicite:78]{index=78}
-    :contentReference[oaicite:79]{index=79}
-        :contentReference[oaicite:80]{index=80}
-    :contentReference[oaicite:81]{index=81}
-        :contentReference[oaicite:82]{index=82}
+# Volatility calculations
+daily_vol = df['Volatility'].iloc[-1]
+weekly_vol = df['Close'].pct_change().rolling(5).std().iloc[-1] * np.sqrt(252)
+monthly_vol = df['Close'].pct_change().rolling(21).std().iloc[-1] * np.sqrt(252)
+
+# UI Tabs
+tabs = st.tabs(["Volatility", "Sentiment", "Indicators & Data"])
+
+with tabs[0]:
+    st.header(f"Volatility Forecasts for {symbol}")
+    st.metric("Daily Volatility", f"{daily_vol*100:.2f} %")
+    st.metric("Weekly Volatility", f"{weekly_vol*100:.2f} %")
+    st.metric("Monthly Volatility", f"{monthly_vol*100:.2f} %")
+    st.line_chart(df['Volatility'])
+
+with tabs[1]:
+    st.header(f"Sentiment Analysis from Latest Headlines")
+    st.write("Sample Headlines:")
+    for h in headlines:
+        st.write(f"- {h}")
+    st.metric("VADER Sentiment", f"{avg_vader:+.2f}")
+    st.metric("TextBlob Sentiment", f"{avg_textblob:+.2f}")
+    st.metric("Composite Sentiment", f"{composite_sentiment:+.2f}")
+    if composite_sentiment > 0.05:
+        st.success("Overall Sentiment: Positive 👍")
+    elif composite_sentiment < -0.05:
+        st.error("Overall Sentiment: Negative 👎")
     else:
-        :contentReference[oaicite:83]{index=83}
+        st.info("Overall Sentiment: Neutral ⚖️")
 
-with tab3:
-    :contentReference[oaicite:84]{index=84}
-    :contentReference[oaicite:85]{index=85}
+with tabs[2]:
+    st.header("Latest Indicators & Data")
+    st.write(df.tail(10)[[
+        'Close', 'EMA9', 'RSI', 'MACD', 'ADX', 'CCI', 'BB_width', 'ATR', 'OBV', 'Volatility'
+    ]])
 
-:contentReference[oaicite:86]{index=86} :contentReference[oaicite:87]{index=87}")
+st.caption("Volatility calculated from historic prices. Sentiment from free VADER and TextBlob NLP methods applied to latest headlines scraped from Yahoo Finance.")
 
