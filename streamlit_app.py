@@ -29,19 +29,33 @@ def load_data(ticker):
     end = datetime.now()
     start = end - timedelta(days=365)
     df = yf.download(ticker, start=start, end=end, interval='1d')
-    df.dropna(inplace=True)
+    df.dropna(subset=['Close'], inplace=True)
 
-    df['EMA9'] = EMAIndicator(df['Close'], window=9).ema_indicator()
-    df['RSI'] = RSIIndicator(df['Close'], window=14).rsi()
-    df['MACD'] = MACD(df['Close']).macd()
-    df['ADX'] = ADXIndicator(df['High'], df['Low'], df['Close']).adx()
-    df['CCI'] = CCIIndicator(df['High'], df['Low'], df['Close']).cci()
-    bb = BollingerBands(df['Close'], window=20, window_dev=2)
-    df['BB_width'] = (bb.bollinger_hband() - bb.bollinger_lband()) / df['Close']
-    df['ATR'] = AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range()
-    df['OBV'] = OnBalanceVolumeIndicator(df['Close'], df['Volume']).on_balance_volume()
-    df['Volatility'] = df['Close'].pct_change().rolling(10).std() * np.sqrt(252)
+    if df.empty:
+        return pd.DataFrame()  # return empty if no data
+
+    close = df['Close'].astype(float).dropna()
+    high = df['High'].astype(float).dropna()
+    low = df['Low'].astype(float).dropna()
+    volume = df['Volume'].astype(float).dropna()
+
+    try:
+        df['EMA9'] = EMAIndicator(close, window=9).ema_indicator()
+        df['RSI'] = RSIIndicator(close, window=14).rsi()
+        df['MACD'] = MACD(close).macd()
+        df['ADX'] = ADXIndicator(high, low, close).adx()
+        df['CCI'] = CCIIndicator(high, low, close).cci()
+        bb = BollingerBands(close, window=20, window_dev=2)
+        df['BB_width'] = (bb.bollinger_hband() - bb.bollinger_lband()) / close
+        df['ATR'] = AverageTrueRange(high, low, close).average_true_range()
+        df['OBV'] = OnBalanceVolumeIndicator(close, volume).on_balance_volume()
+        df['Volatility'] = close.pct_change().rolling(10).std() * np.sqrt(252)
+    except Exception as e:
+        st.error(f"Error calculating technical indicators: {e}")
+        return pd.DataFrame()  # Return empty to signal failure
+
     return df
+
 
 df = load_data(symbol)
 if df.empty:
