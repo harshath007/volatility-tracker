@@ -1,119 +1,113 @@
-import streamlit as st
-import yfinance as yf
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from ta.trend import EMAIndicator, MACD
-from ta.momentum import RSIIndicator
+# app.py
 
-# Fetch data with fallback and validation
-def fetch_stock_data(symbol):
-    end = datetime.now()
-    start = end - timedelta(days=10)
+:contentReference[oaicite:11]{index=11}
+:contentReference[oaicite:12]{index=12}
+:contentReference[oaicite:13]{index=13}
+:contentReference[oaicite:14]{index=14}
+:contentReference[oaicite:15]{index=15}
+:contentReference[oaicite:16]{index=16}
+:contentReference[oaicite:17]{index=17}
+:contentReference[oaicite:18]{index=18}
+:contentReference[oaicite:19]{index=19}
+:contentReference[oaicite:20]{index=20}
+:contentReference[oaicite:21]{index=21}
+:contentReference[oaicite:22]{index=22}
+import torch
 
-    df = yf.download(symbol, interval='5m', start=start, end=end, prepost=True)
+# Initialize sentiment tools
+:contentReference[oaicite:23]{index=23}
+vader = SentimentIntensityAnalyzer()
+:contentReference[oaicite:24]{index=24}
+:contentReference[oaicite:25]{index=25}
 
-    # Flatten columns if MultiIndex
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+# SETTINGS
+:contentReference[oaicite:26]{index=26}
+:contentReference[oaicite:27]{index=27}
+:contentReference[oaicite:28]{index=28}
+:contentReference[oaicite:29]{index=29}
+    st.stop()
 
-    if df is None or df.empty or 'Close' not in df.columns or df['Close'].dropna().empty:
-        df = yf.download(symbol, interval='1d', start=start, end=end)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        if df is None or df.empty or 'Close' not in df.columns or df['Close'].dropna().empty:
-            return None, "No valid data found for symbol."
-        else:
-            return df, "Using daily data fallback."
-    return df, "Using 5-minute intraday data."
-
-
-# Add technical indicators safely
-def add_indicators(df):
-    if 'Close' not in df.columns or df['Close'].dropna().empty:
-        raise ValueError("DataFrame missing valid 'Close' column.")
-
-    df = df.dropna(subset=['Close'])
-    df['EMA9'] = EMAIndicator(close=df['Close'], window=9).ema_indicator()
-    df['RSI'] = RSIIndicator(close=df['Close']).rsi()
-    df['MACD'] = MACD(close=df['Close']).macd()
-    df.dropna(inplace=True)
+# Data fetch & indicators
+:contentReference[oaicite:30]{index=30}
+:contentReference[oaicite:31]{index=31}
+    :contentReference[oaicite:32]{index=32}
+    :contentReference[oaicite:33]{index=33}
+    :contentReference[oaicite:34]{index=34}
+    :contentReference[oaicite:35]{index=35}
+    :contentReference[oaicite:36]{index=36}
+    :contentReference[oaicite:37]{index=37}
+    :contentReference[oaicite:38]{index=38}
+    :contentReference[oaicite:39]{index=39}
+    :contentReference[oaicite:40]{index=40}
+    :contentReference[oaicite:41]{index=41}
+    :contentReference[oaicite:42]{index=42}
+    :contentReference[oaicite:43]{index=43}
+    :contentReference[oaicite:44]{index=44}
     return df
 
-# Get morning price change depending on interval
-def get_morning_price_change(df, interval='5m'):
-    df = df.copy()
-    df.index = df.index.tz_localize(None)
+:contentReference[oaicite:45]{index=45}
+:contentReference[oaicite:46]{index=46}
+    :contentReference[oaicite:47]{index=47}
+    st.stop()
 
-    if interval == '5m':
-        # Morning 6:30-9:30 PT = 13:30-16:30 UTC
-        morning_df = df.between_time('13:30', '16:30')
-        if morning_df.empty:
-            return None
-        open_price = morning_df.iloc[0]['Open']
-        close_price = morning_df.iloc[-1]['Close']
-        return (close_price - open_price) / open_price
+# Sentiment functions
+:contentReference[oaicite:48]{index=48}
+    :contentReference[oaicite:49]{index=49}
+                         :contentReference[oaicite:50]{index=50}
+                         user_agent="voltracker")
+    :contentReference[oaicite:51]{index=51}
+    :contentReference[oaicite:52]{index=52}
+
+def news_sentiment():
+    q = symbol
+    :contentReference[oaicite:53]{index=53}
+    :contentReference[oaicite:54]{index=54}
+    :contentReference[oaicite:55]{index=55}
+    scores = []
+    :contentReference[oaicite:56]{index=56}
+        :contentReference[oaicite:57]{index=57}
+        :contentReference[oaicite:58]{index=58}
+        # FinBERT scoring
+        :contentReference[oaicite:59]{index=59}
+        :contentReference[oaicite:60]{index=60}
+        :contentReference[oaicite:61]{index=61}
+        :contentReference[oaicite:62]{index=62}
+        :contentReference[oaicite:63]{index=63}
+    :contentReference[oaicite:64]{index=64}
+
+# Compute values
+sent_reddit = reddit_sentiment()
+sent_news = news_sentiment()
+:contentReference[oaicite:65]{index=65}
+
+:contentReference[oaicite:66]{index=66}
+:contentReference[oaicite:67]{index=67}
+:contentReference[oaicite:68]{index=68}
+
+# UI
+:contentReference[oaicite:69]{index=69}
+with tab1:
+    :contentReference[oaicite:70]{index=70}
+    :contentReference[oaicite:71]{index=71}*100:.2f}%")
+    :contentReference[oaicite:72]{index=72}*100:.2f}%")
+    :contentReference[oaicite:73]{index=73}
+    :contentReference[oaicite:74]{index=74}
+
+with tab2:
+    :contentReference[oaicite:75]{index=75}
+    :contentReference[oaicite:76]{index=76}
+    :contentReference[oaicite:77]{index=77}
+    :contentReference[oaicite:78]{index=78}
+    :contentReference[oaicite:79]{index=79}
+        :contentReference[oaicite:80]{index=80}
+    :contentReference[oaicite:81]{index=81}
+        :contentReference[oaicite:82]{index=82}
     else:
-        if len(df) < 2:
-            return None
-        prev_close = df['Close'].iloc[-2]
-        today_open = df['Open'].iloc[-1]
-        return (today_open - prev_close) / prev_close
+        :contentReference[oaicite:83]{index=83}
 
-# Compute composite score
-def compute_score(df):
-    last = df.iloc[-1]
-    norm_ema = (last['EMA9'] - df['EMA9'].min()) / (df['EMA9'].max() - df['EMA9'].min()) if df['EMA9'].max() != df['EMA9'].min() else 0.5
-    norm_rsi = last['RSI'] / 100
-    norm_macd = (last['MACD'] - df['MACD'].min()) / (df['MACD'].max() - df['MACD'].min()) if df['MACD'].max() != df['MACD'].min() else 0.5
+with tab3:
+    :contentReference[oaicite:84]{index=84}
+    :contentReference[oaicite:85]{index=85}
 
-    score = 0.4 * norm_ema + 0.3 * norm_rsi + 0.3 * norm_macd
-    return score
+:contentReference[oaicite:86]{index=86} :contentReference[oaicite:87]{index=87}")
 
-# Streamlit UI
-st.set_page_config(page_title="Stock Morning Predictor", layout="wide")
-st.title("Stock Predictor")
-
-symbol = st.text_input("Enter Stock/ETF Symbol (e.g. AAPL, TSLA, GLD)").upper().strip()
-
-if symbol:
-    with st.spinner("Fetching data and calculating prediction..."):
-        df, msg = fetch_stock_data(symbol)
-
-        if df is None:
-            st.error(msg)
-            st.stop()
-
-        st.info(msg)
-        st.write(f"Data shape: {df.shape}")
-        st.write("Columns:", df.columns.tolist())
-
-        if 'Close' not in df.columns or df['Close'].dropna().empty:
-            st.error("No valid 'Close' prices available in the data.")
-            st.stop()
-
-        try:
-            df = add_indicators(df)
-        except Exception as e:
-            st.error(f"Error processing indicators: {e}")
-            st.stop()
-
-        interval = '5m' if '5-minute' in msg or '5m' in msg else '1d'
-        morning_change = get_morning_price_change(df, interval=interval)
-
-        if morning_change is None:
-            st.warning("Could not calculate morning price change for this data.")
-        else:
-            score = compute_score(df)
-            st.subheader(f"Prediction for {symbol}")
-            st.metric("Predicted Morning Price Change", f"{morning_change * 100:.2f}%")
-
-            if score > 0.65:
-                st.success("📈 This stock is likely to rise tomorrow morning.")
-            elif score < 0.35:
-                st.warning("📉 This stock is likely to fall tomorrow morning.")
-            else:
-                st.info("⚖️ This stock may remain neutral or range-bound tomorrow morning.")
-
-            if st.checkbox("Show recent data and indicators"):
-                st.write(df.tail(10))
